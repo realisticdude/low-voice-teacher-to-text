@@ -1,20 +1,18 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useState } from "react";
+import { HomeScreen } from "./src/screens/HomeScreen";
+import { TeacherScreen } from "./src/screens/TeacherScreen";
+import { StudentScreen } from "./src/screens/StudentScreen";
+
+type Screen = "home" | "teacher" | "student";
 
 export default function App() {
-  return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
-  );
-}
+  const [screen, setScreen] = useState<Screen>("home");
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+  if (screen === "teacher") {
+    return <TeacherScreen onExit={() => setScreen("home")} />;
+  }
+  if (screen === "student") {
+    return <StudentScreen onExit={() => setScreen("home")} />;
+  }
+  return <HomeScreen onSelectRole={setScreen} />;
+}
