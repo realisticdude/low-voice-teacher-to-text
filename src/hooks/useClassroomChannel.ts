@@ -55,9 +55,12 @@ export function useClassroomChannel({
     channelRef.current = channel;
     let subscribed = false;
     let classroomEnded = false;
-    // Only treat a missing teacher as "left" after we've actually seen them,
-    // so a student who joins before presence syncs isn't told they're gone.
-    let teacherSeen = false;
+    // Students only: whether the last presence sync included the teacher.
+    // Null until the first sync, which carries the channel's full presence
+    // list, so a student joining while the teacher is away is told too.
+    let teacherHere: boolean | null = null;
+    const connectedStatus = (): ConnectionStatus =>
+      teacherHere === false ? "disconnected" : "connected";
 
     onCaption(channel, (message) => {
       onCaptionRef.current?.(message);
@@ -79,16 +82,13 @@ export function useClassroomChannel({
       setStudentCount(students.length);
 
       if (role === "student" && !classroomEnded) {
-        const present = entries.some((presences) =>
+        // Fallback for when the "classroom-ended" broadcast never arrives
+        // (e.g. the teacher lost connection): show the channel as broken.
+        teacherHere = entries.some((presences) =>
           presences.some((p) => p.role === "teacher")
         );
-        if (present) teacherSeen = true;
-        if (teacherSeen) {
-          // Fallback for when the "classroom-ended" broadcast never arrives
-          // (e.g. the teacher lost connection): show the channel as broken.
-          setTeacherPresent(present);
-          if (subscribed) setStatus(present ? "connected" : "disconnected");
-        }
+        setTeacherPresent(teacherHere);
+        if (subscribed) setStatus(connectedStatus());
       }
     });
 
@@ -96,7 +96,7 @@ export function useClassroomChannel({
       if (subscribeStatus === "SUBSCRIBED") {
         subscribed = true;
         await channel.track({ name, role });
-        setStatus("connected");
+        setStatus(connectedStatus());
       } else if (
         subscribeStatus === "CHANNEL_ERROR" ||
         subscribeStatus === "TIMED_OUT"
