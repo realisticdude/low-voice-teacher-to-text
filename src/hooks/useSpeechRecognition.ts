@@ -42,6 +42,9 @@ export function useSpeechRecognition(
   // Tracks whether the caller wants recognition running, so we know whether
   // an "end" event should trigger an auto-restart or be treated as a real stop.
   const wantsListeningRef = useRef(false);
+  // Set when an error was surfaced, so the "end" event that follows every
+  // error doesn't overwrite the "error" status with "stopped".
+  const errorShownRef = useRef(false);
   const lastFinalTranscriptRef = useRef<string>("");
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   onFinalTranscriptRef.current = onFinalTranscript;
@@ -72,20 +75,40 @@ export function useSpeechRecognition(
   useSpeechRecognitionEvent("error", (event) => {
     if (event.error === "not-allowed" || event.error === "service-not-allowed") {
       wantsListeningRef.current = false;
+      errorShownRef.current = true;
       setStatus("permission-denied");
-      setErrorMessage("Microphone or speech recognition permission was denied.");
+      setErrorMessage(PERMISSION_DENIED_MESSAGE);
       return;
     }
     if (event.error === "no-speech" || event.error === "speech-timeout") {
       // Not a real error, just silence - the "end" handler will restart if needed.
       return;
     }
+    if (event.error === "aborted" && !wantsListeningRef.current) {
+      // The session was stopped on purpose (Stop, End Classroom, backgrounding).
+      return;
+    }
+    if (event.error === "busy" || event.error === "client") {
+      // Transient on some Android recognizers between sessions - let the
+      // "end" handler restart rather than stopping captions.
+      return;
+    }
+    // A real failure: don't let the "end" event that follows auto-restart,
+    // which would immediately clear the banner. The teacher taps Start to retry.
+    wantsListeningRef.current = false;
+    errorShownRef.current = true;
     setErrorMessage(event.message || event.error);
     setStatus("error");
   });
 
   useSpeechRecognitionEvent("end", () => {
     setInterimText("");
+    if (errorShownRef.current) {
+      // Keep the "error"/"permission-denied" status (and its banner) set by
+      // the error handler.
+      errorShownRef.current = false;
+      return;
+    }
     if (wantsListeningRef.current) {
       // The native session ended on its own (common on Android without
       // continuous support) - restart to keep captions flowing.
@@ -128,12 +151,11 @@ export function useSpeechRecognition(
     const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!permission.granted) {
       setStatus("permission-denied");
-      setErrorMessage(
-        "Microphone and speech recognition permissions are required to start captions."
-      );
+      setErrorMessage(PERMISSION_DENIED_MESSAGE);
       return;
     }
 
+    errorShownRef.current = false;
     lastFinalTranscriptRef.current = "";
     wantsListeningRef.current = true;
     setStatus("starting");
@@ -156,6 +178,9 @@ export function useSpeechRecognition(
 
   return { status, interimText, errorMessage, start, stop };
 }
+
+const PERMISSION_DENIED_MESSAGE =
+  "Microphone or speech recognition permission was denied. Enable it in Settings to use captions.";
 
 const RECOGNITION_OPTIONS = {
   lang: "en-US",

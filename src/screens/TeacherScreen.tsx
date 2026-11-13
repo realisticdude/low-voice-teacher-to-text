@@ -45,7 +45,7 @@ export function TeacherScreen({ onExit }: TeacherScreenProps) {
 
   const speech = useSpeechRecognition(handleFinalTranscript);
 
-  const { status, studentCount, sendCaption } = useClassroomChannel({
+  const { status, studentCount, sendCaption, announceEnded } = useClassroomChannel({
     code: classroom?.code ?? "",
     participantId,
     name: teacherName,
@@ -104,6 +104,13 @@ export function TeacherScreen({ onExit }: TeacherScreenProps) {
   const handleEndClassroom = async () => {
     speech.stop();
     if (classroom) {
+      // Tell students first: once the classroom is inactive, the realtime
+      // policies no longer let the teacher send to its channel.
+      try {
+        await announceEnded();
+      } catch {
+        // Best-effort - students also notice the teacher leaving presence.
+      }
       try {
         await setClassroomActive(classroom.id, false);
       } catch {
@@ -132,6 +139,7 @@ export function TeacherScreen({ onExit }: TeacherScreenProps) {
             value={teacherName}
             onChangeText={setTeacherName}
             autoCapitalize="words"
+            maxLength={60}
             returnKeyType="done"
           />
 

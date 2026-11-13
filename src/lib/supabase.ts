@@ -2,8 +2,10 @@ import "react-native-url-polyfill/auto";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+// Treat blank values (e.g. `EXPO_PUBLIC_SUPABASE_URL=`) as missing, so the
+// app shows the setup banner instead of createClient throwing on launch.
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || undefined;
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() || undefined;
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -20,8 +22,8 @@ export const supabase = createClient(
   {
     auth: {
       storage: AsyncStorage,
-      autoRefreshToken: false,
-      persistSession: false,
+      autoRefreshToken: true,
+      persistSession: true,
       detectSessionInUrl: false,
     },
     realtime: {
@@ -31,3 +33,21 @@ export const supabase = createClient(
     },
   }
 );
+
+/**
+ * Signs the device in anonymously (no visible account) if it isn't already.
+ * The database and realtime policies use this user id to tell a classroom's
+ * teacher apart from its students and from outsiders.
+ */
+export async function ensureSession(): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  let session = data.session;
+  if (!session) {
+    const { data: signIn, error } = await supabase.auth.signInAnonymously();
+    if (error) throw error;
+    session = signIn.session;
+  }
+  // Private channels authorize with the user's token, so hand it to realtime
+  // before any channel subscribes.
+  await supabase.realtime.setAuth(session?.access_token ?? null);
+}

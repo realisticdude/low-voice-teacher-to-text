@@ -37,7 +37,7 @@ export function StudentScreen({ onExit }: StudentScreenProps) {
 
   const participantId = useMemo(() => generateId(), []);
 
-  const { status } = useClassroomChannel({
+  const { status, ended, teacherPresent } = useClassroomChannel({
     code: classroom?.code ?? "",
     participantId,
     name: studentName,
@@ -88,6 +88,7 @@ export function StudentScreen({ onExit }: StudentScreenProps) {
             value={studentName}
             onChangeText={setStudentName}
             autoCapitalize="words"
+            maxLength={60}
             returnKeyType="next"
           />
           <View style={{ height: spacing.sm }} />
@@ -135,6 +136,20 @@ export function StudentScreen({ onExit }: StudentScreenProps) {
           <StatusPill status={status} />
         </View>
 
+        {ended ? (
+          <>
+            <View style={{ height: spacing.md }} />
+            <ErrorBanner message="The teacher ended this classroom." />
+          </>
+        ) : (
+          !teacherPresent && (
+            <>
+              <View style={{ height: spacing.md }} />
+              <ErrorBanner message="The teacher has disconnected. Captions will resume if they reconnect." />
+            </>
+          )
+        )}
+
         <View style={{ height: spacing.md }} />
         <CaptionView
           finalText={caption?.text ?? ""}
@@ -142,7 +157,11 @@ export function StudentScreen({ onExit }: StudentScreenProps) {
         />
 
         <View style={{ height: spacing.md }} />
-        <Button label="Leave Classroom" variant="secondary" onPress={handleLeave} />
+        <Button
+          label={ended ? "Back to Home" : "Leave Classroom"}
+          variant={ended ? "primary" : "secondary"}
+          onPress={handleLeave}
+        />
       </View>
     </SafeAreaView>
   );
