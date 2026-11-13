@@ -66,6 +66,17 @@ create policy "participants_select" on public.participants
   using (true);
 
 -- ---------------------------------------------------------------------------
+-- Grants
+--
+-- Newer Supabase projects don't expose new tables to the Data API by default,
+-- so grant the anon role exactly the privileges the policies above allow.
+-- ---------------------------------------------------------------------------
+
+grant usage on schema public to anon;
+grant select, insert, update on public.classrooms to anon;
+grant select, insert on public.participants to anon;
+
+-- ---------------------------------------------------------------------------
 -- Realtime
 --
 -- Live caption text itself is sent over Supabase Realtime Broadcast on a
