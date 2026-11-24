@@ -1,5 +1,6 @@
 -- LiveClass Caption — Supabase schema (MVP)
 -- Run this in the Supabase SQL editor (Project > SQL Editor > New query).
+-- Safe to run again: it updates an existing setup in place.
 --
 -- Before running, in the Supabase dashboard:
 --   1. Authentication > Sign In / Providers: enable "Anonymous sign-ins".
@@ -133,16 +134,27 @@ grant execute on function public.find_classroom_by_code(text) to authenticated;
 alter table public.classrooms enable row level security;
 alter table public.participants enable row level security;
 
+-- Policies from earlier versions of this file, which let the anon role read
+-- and write every row. Dropped so re-running this file upgrades cleanly.
+drop policy if exists "classrooms_insert" on public.classrooms;
+drop policy if exists "classrooms_select" on public.classrooms;
+drop policy if exists "classrooms_update" on public.classrooms;
+drop policy if exists "participants_insert" on public.participants;
+drop policy if exists "participants_select" on public.participants;
+
 -- Classrooms: a signed-in device can create one for itself, see the ones it
 -- created, and end them. Nobody else can read, rename or re-code them.
+drop policy if exists "classrooms_insert_own" on public.classrooms;
 create policy "classrooms_insert_own" on public.classrooms
   for insert to authenticated
   with check (owner_id = (select auth.uid()));
 
+drop policy if exists "classrooms_select_own" on public.classrooms;
 create policy "classrooms_select_own" on public.classrooms
   for select to authenticated
   using (owner_id = (select auth.uid()));
 
+drop policy if exists "classrooms_update_own" on public.classrooms;
 create policy "classrooms_update_own" on public.classrooms
   for update to authenticated
   using (owner_id = (select auth.uid()))
@@ -150,6 +162,7 @@ create policy "classrooms_update_own" on public.classrooms
 
 -- Participants: a device registers only itself. Only a classroom's owner can
 -- join it as the teacher, and students can only join active classrooms.
+drop policy if exists "participants_insert_self" on public.participants;
 create policy "participants_insert_self" on public.participants
   for insert to authenticated
   with check (
@@ -160,6 +173,7 @@ create policy "participants_insert_self" on public.participants
     )
   );
 
+drop policy if exists "participants_select_self" on public.participants;
 create policy "participants_select_self" on public.participants
   for select to authenticated
   using (user_id = (select auth.uid()));
@@ -190,6 +204,7 @@ grant select, insert on public.participants to authenticated;
 
 -- Teacher and registered students of an active classroom receive its
 -- broadcasts and presence.
+drop policy if exists "classroom_members_receive" on realtime.messages;
 create policy "classroom_members_receive" on realtime.messages
   for select to authenticated
   using (
@@ -198,6 +213,7 @@ create policy "classroom_members_receive" on realtime.messages
   );
 
 -- Only the classroom's teacher may broadcast captions.
+drop policy if exists "classroom_owner_broadcasts" on realtime.messages;
 create policy "classroom_owner_broadcasts" on realtime.messages
   for insert to authenticated
   with check (
@@ -206,6 +222,7 @@ create policy "classroom_owner_broadcasts" on realtime.messages
   );
 
 -- Members may announce themselves in presence (used for the student count).
+drop policy if exists "classroom_members_track_presence" on realtime.messages;
 create policy "classroom_members_track_presence" on realtime.messages
   for insert to authenticated
   with check (

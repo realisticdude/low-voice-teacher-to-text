@@ -1,18 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Button } from "../components/Button";
 import { TextField } from "../components/TextField";
 import { StatusPill } from "../components/StatusPill";
 import { CaptionView } from "../components/CaptionView";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { MicLevel } from "../components/MicLevel";
 import { colors, spacing } from "../components/theme";
 import {
   addParticipant,
@@ -52,36 +55,58 @@ export function TeacherScreen({ onExit }: TeacherScreenProps) {
     role: "teacher",
   });
 
-  // Broadcast the finalized transcript to students as it grows.
-  const lastSentFinalRef = useRef("");
-  useEffect(() => {
-    if (!classroom || finalText === lastSentFinalRef.current) return;
-    lastSentFinalRef.current = finalText;
-    const message: CaptionMessage = {
-      id: generateId(),
-      text: finalText,
-      isFinal: true,
-      senderName: teacherName,
-      timestamp: Date.now(),
-    };
-    sendCaption(message);
-  }, [finalText, classroom, teacherName, sendCaption]);
+  // Broadcast captions to students. Finalized text goes out at once; interim
+  // (in-progress) text is throttled, because recognizers can emit many
+  // partial results a second and Supabase rate-limits each client.
+  const teacherNameRef = useRef(teacherName);
+  teacherNameRef.current = teacherName;
+  const lastSentTextRef = useRef("");
+  const lastSentAtRef = useRef(0);
+  const pendingRef = useRef<{ text: string; isFinal: boolean } | null>(null);
+  const sendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Broadcast interim (in-progress) text so students see captions with less delay.
+  const flushCaption = useCallback(() => {
+    if (sendTimerRef.current) {
+      clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = null;
+    }
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = null;
+    lastSentAtRef.current = Date.now();
+    sendCaption({
+      id: generateId(),
+      text: trimCaption(pending.text),
+      isFinal: pending.isFinal,
+      senderName: teacherNameRef.current,
+      timestamp: Date.now(),
+    });
+  }, [sendCaption]);
+
   useEffect(() => {
     if (!classroom) return;
-    const message: CaptionMessage = {
-      id: generateId(),
-      text: speech.interimText
-        ? `${finalText} ${speech.interimText}`.trim()
-        : finalText,
-      isFinal: false,
-      senderName: teacherName,
-      timestamp: Date.now(),
-    };
-    sendCaption(message);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speech.interimText]);
+    const interim = speech.interimText;
+    const text = interim ? `${finalText} ${interim}`.trim() : finalText;
+    if (text === lastSentTextRef.current) return;
+    lastSentTextRef.current = text;
+    pendingRef.current = { text, isFinal: !interim };
+
+    const wait = interim
+      ? Math.max(0, INTERIM_SEND_INTERVAL_MS - (Date.now() - lastSentAtRef.current))
+      : 0;
+    if (wait === 0) {
+      flushCaption();
+    } else if (!sendTimerRef.current) {
+      sendTimerRef.current = setTimeout(flushCaption, wait);
+    }
+  }, [finalText, speech.interimText, classroom, flushCaption]);
+
+  useEffect(
+    () => () => {
+      if (sendTimerRef.current) clearTimeout(sendTimerRef.current);
+    },
+    []
+  );
 
   const handleCreateClassroom = async () => {
     setSetupError(null);
@@ -119,6 +144,29 @@ export function TeacherScreen({ onExit }: TeacherScreenProps) {
     }
     onExit();
   };
+
+  // Android's back button would otherwise close the app and leave the
+  // classroom active with no teacher.
+  const handleEndRef = useRef(handleEndClassroom);
+  handleEndRef.current = handleEndClassroom;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (!classroom) {
+        onExit();
+        return true;
+      }
+      Alert.alert("End classroom?", "Students will stop receiving captions.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "End Classroom",
+          style: "destructive",
+          onPress: () => void handleEndRef.current(),
+        },
+      ]);
+      return true;
+    });
+    return () => sub.remove();
+  }, [classroom, onExit]);
 
   if (!classroom) {
     return (
@@ -198,6 +246,10 @@ export function TeacherScreen({ onExit }: TeacherScreenProps) {
         )}
         {speech.status === "error" && speech.errorMessage && (
           <ErrorBanner message={speech.errorMessage} />
+        )}
+
+        {isListening && speech.volume !== null && (
+          <MicLevel volume={speech.volume} />
         )}
 
         <View style={{ height: spacing.md }} />
@@ -287,3 +339,20 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
 });
+
+/** Minimum gap between interim caption broadcasts (keeps us under the realtime rate limit). */
+const INTERIM_SEND_INTERVAL_MS = 300;
+
+/**
+ * Each broadcast carries the transcript so far, so late joiners catch up.
+ * Cap it so a long lecture doesn't outgrow Supabase's message size limit;
+ * students still see the most recent part.
+ */
+const MAX_CAPTION_CHARS = 4000;
+
+function trimCaption(text: string): string {
+  if (text.length <= MAX_CAPTION_CHARS) return text;
+  const tail = text.slice(-MAX_CAPTION_CHARS);
+  const firstSpace = tail.indexOf(" ");
+  return `…${firstSpace > 0 ? tail.slice(firstSpace + 1) : tail}`;
+}

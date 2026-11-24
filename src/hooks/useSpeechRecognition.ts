@@ -3,6 +3,7 @@ import { AppState } from "react-native";
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
+  type ExpoSpeechRecognitionOptions,
 } from "expo-speech-recognition";
 
 export type SpeechRecognitionStatus =
@@ -18,6 +19,11 @@ interface UseSpeechRecognitionResult {
   status: SpeechRecognitionStatus;
   interimText: string;
   errorMessage: string | null;
+  /**
+   * Latest input level from the mic, roughly -2 (silent) to 10 (loud).
+   * Null when not listening or when the platform doesn't report it (web).
+   */
+  volume: number | null;
   start: () => Promise<void>;
   stop: () => void;
 }
@@ -38,6 +44,7 @@ export function useSpeechRecognition(
   const [status, setStatus] = useState<SpeechRecognitionStatus>("idle");
   const [interimText, setInterimText] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [volume, setVolume] = useState<number | null>(null);
 
   // Tracks whether the caller wants recognition running, so we know whether
   // an "end" event should trigger an auto-restart or be treated as a real stop.
@@ -103,6 +110,7 @@ export function useSpeechRecognition(
 
   useSpeechRecognitionEvent("end", () => {
     setInterimText("");
+    setVolume(null);
     if (errorShownRef.current) {
       // Keep the "error"/"permission-denied" status (and its banner) set by
       // the error handler.
@@ -125,11 +133,24 @@ export function useSpeechRecognition(
     }
   });
 
-  // Pause recognition when the app is backgrounded; the OS suspends mic
-  // access anyway, and resuming a stale session tends to throw errors.
+  useSpeechRecognitionEvent("volumechange", (event) => {
+    setVolume(event.value);
+  });
+
+  // Pause recognition when the app is backgrounded (the OS suspends mic
+  // access anyway, and resuming a stale session tends to throw errors), then
+  // start a fresh session when the teacher comes back.
+  const resumeOnActiveRef = useRef(false);
+  const startRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState !== "active" && wantsListeningRef.current) {
+      if (nextState === "active") {
+        if (resumeOnActiveRef.current) {
+          resumeOnActiveRef.current = false;
+          void startRef.current();
+        }
+      } else if (nextState === "background" && wantsListeningRef.current) {
+        resumeOnActiveRef.current = true;
         wantsListeningRef.current = false;
         ExpoSpeechRecognitionModule.stop();
       }
@@ -169,22 +190,36 @@ export function useSpeechRecognition(
       );
     }
   }, []);
+  startRef.current = start;
 
   const stop = useCallback(() => {
     wantsListeningRef.current = false;
+    resumeOnActiveRef.current = false;
     setInterimText("");
     ExpoSpeechRecognitionModule.stop();
   }, []);
 
-  return { status, interimText, errorMessage, start, stop };
+  return { status, interimText, errorMessage, volume, start, stop };
 }
 
 const PERMISSION_DENIED_MESSAGE =
   "Microphone or speech recognition permission was denied. Enable it in Settings to use captions.";
 
-const RECOGNITION_OPTIONS = {
+const RECOGNITION_OPTIONS: ExpoSpeechRecognitionOptions = {
   lang: "en-US",
   interimResults: true,
   continuous: true,
   addsPunctuation: true,
-} as const;
+  // Drives the mic level meter so a quiet teacher can see they're heard.
+  volumeChangeEventOptions: { enabled: true, intervalMillis: 150 },
+  // iOS: Apple's voice processing adds automatic gain control, which helps
+  // pick up a soft voice (it also lowers speaker playback, unused here).
+  iosVoiceProcessingEnabled: true,
+  // Android: wait longer before treating a pause as the end of speech, so
+  // quiet or hesitant speakers aren't cut off mid-sentence. Some recognizer
+  // services ignore these hints.
+  androidIntentOptions: {
+    EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 3000,
+    EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 3000,
+  },
+};

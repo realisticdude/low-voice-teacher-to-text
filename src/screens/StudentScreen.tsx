@@ -1,12 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Button } from "../components/Button";
 import { TextField } from "../components/TextField";
@@ -68,6 +69,17 @@ export function StudentScreen({ onExit }: StudentScreenProps) {
     setCaption(null);
     onExit();
   };
+
+  // Android's back button returns to Home instead of closing the app.
+  const handleLeaveRef = useRef(handleLeave);
+  handleLeaveRef.current = handleLeave;
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      handleLeaveRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   if (!classroom) {
     return (
