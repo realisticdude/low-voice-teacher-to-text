@@ -26,8 +26,10 @@ npm install
 ### 2. Create a Supabase project
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Open **SQL Editor** and run [`supabase/schema.sql`](supabase/schema.sql) to create the `classrooms` and `participants` tables, indexes, and RLS policies.
-3. Grab your project's **Project URL** and **anon public key** from **Project Settings → API**.
+2. In **Authentication → Sign In / Providers**, enable **Anonymous sign-ins**. Each device signs in invisibly so the app can tell a classroom's teacher from its students.
+3. In **Realtime → Settings**, disable **Allow public access**, so every channel is checked against the realtime policies.
+4. Open **SQL Editor** and run [`supabase/schema.sql`](supabase/schema.sql) to create the `classrooms` and `participants` tables, indexes, lookup function, and RLS policies (including the ones for Realtime).
+5. Grab your project's **Project URL** and **publishable key** (or legacy **anon public key**) from **Project Settings → API Keys**.
 
 ### 3. Configure environment variables
 
@@ -83,5 +85,6 @@ supabase/
 
 ## Notes
 
-- Access control is intentionally code-based, not account-based: anyone who knows a classroom code can join it. RLS policies scope the anon key to only the `classrooms` and `participants` tables, with no delete access.
+- Access control is intentionally code-based, not account-based: anyone who knows a classroom code can join it. Behind the scenes each device has an anonymous Supabase user, and RLS uses it so that only the teacher who created a classroom can end it or broadcast captions, only joined participants can receive them, and classrooms are looked up by exact code (they can't be listed). There is no delete access.
+- Supabase recommends CAPTCHA or Cloudflare Turnstile for anonymous sign-ins in production, and anonymous users aren't cleaned up automatically.
 - Expo APIs referenced in this codebase should match the [v57 docs](https://docs.expo.dev/versions/v57.0.0/) — the SDK has changed significantly across versions.

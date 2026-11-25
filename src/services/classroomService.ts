@@ -1,4 +1,4 @@
-import { supabase } from "../lib/supabase";
+import { ensureSession, supabase } from "../lib/supabase";
 import type { Classroom, Role } from "../types";
 
 // Excludes visually-ambiguous characters (0/O, 1/I/L) to keep codes easy to read aloud.
@@ -27,15 +27,24 @@ export class ClassroomServiceError extends Error {
   }
 }
 
+// Supabase returns plain `{ message, details, ... }` objects rather than Error
+// instances, e.g. "TypeError: Network request failed" when offline.
+function errorField(error: unknown, field: "message" | "details"): string {
+  if (!error || typeof error !== "object") return "";
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === "string" ? value : "";
+}
+
 function wrapError(error: unknown): ClassroomServiceError {
   if (error instanceof ClassroomServiceError) return error;
-  const message =
-    error instanceof Error ? error.message : "Something went wrong.";
-  const isNetwork = /network|fetch|failed to fetch/i.test(message);
+  const message = errorField(error, "message");
+  const isNetwork = /network|fetch|timed? ?out|offline/i.test(
+    `${message} ${errorField(error, "details")}`
+  );
   return new ClassroomServiceError(
     isNetwork
       ? "Could not reach the server. Check your internet connection."
-      : message,
+      : message || "Something went wrong.",
     isNetwork ? "NETWORK" : "UNKNOWN"
   );
 }
@@ -49,6 +58,14 @@ export async function createClassroom(
     throw new ClassroomServiceError("Please enter your name.");
   }
 
+  try {
+    await ensureSession();
+  } catch (error) {
+    throw wrapError(error);
+  }
+
+  // owner_id defaults to the signed-in user, which makes this device the
+  // only one allowed to end the classroom or broadcast captions to it.
   const MAX_ATTEMPTS = 5;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const code = generateClassroomCode();
@@ -82,11 +99,17 @@ export async function findActiveClassroomByCode(
     throw new ClassroomServiceError("Please enter a classroom code.");
   }
 
+  try {
+    await ensureSession();
+  } catch (error) {
+    throw wrapError(error);
+  }
+
+  // Classrooms can't be read directly (that would let anyone list every
+  // code), so look one up by its exact code through a database function.
   const { data, error } = await supabase
-    .from("classrooms")
-    .select()
-    .eq("code", normalizedCode)
-    .maybeSingle();
+    .rpc("find_classroom_by_code", { p_code: normalizedCode })
+    .maybeSingle<Classroom>();
 
   if (error) throw wrapError(error);
 
@@ -117,6 +140,14 @@ export async function addParticipant(
     throw new ClassroomServiceError("Please enter your name.");
   }
 
+  try {
+    await ensureSession();
+  } catch (error) {
+    throw wrapError(error);
+  }
+
+  // user_id defaults to the signed-in user; the realtime policies only let
+  // registered participants join the classroom's channel.
   const { error } = await supabase.from("participants").insert({
     classroom_id: classroomId,
     name: trimmedName,

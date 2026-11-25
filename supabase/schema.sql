@@ -1,14 +1,23 @@
 -- LiveClass Caption — Supabase schema (MVP)
 -- Run this in the Supabase SQL editor (Project > SQL Editor > New query).
+--
+-- Before running, in the Supabase dashboard:
+--   1. Authentication > Sign In / Providers: enable "Anonymous sign-ins".
+--   2. Realtime > Settings: disable "Allow public access" so every channel
+--      join is checked against the realtime.messages policies below.
 
 -- ---------------------------------------------------------------------------
 -- Tables
 -- ---------------------------------------------------------------------------
 
+-- Each device signs in anonymously (no visible account), so every row is tied
+-- to an auth user id. That lets the policies below tell a classroom's teacher
+-- apart from its students and from outsiders holding the public API key.
 create table if not exists public.classrooms (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
-  teacher_name text not null,
+  teacher_name text not null check (char_length(teacher_name) between 1 and 60),
+  owner_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   created_at timestamptz not null default now(),
   active boolean not null default true
 );
@@ -16,7 +25,8 @@ create table if not exists public.classrooms (
 create table if not exists public.participants (
   id uuid primary key default gen_random_uuid(),
   classroom_id uuid not null references public.classrooms (id) on delete cascade,
-  name text not null,
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  name text not null check (char_length(name) between 1 and 60),
   role text not null check (role in ('teacher', 'student')),
   joined_at timestamptz not null default now()
 );
@@ -26,68 +36,179 @@ create table if not exists public.participants (
 -- ---------------------------------------------------------------------------
 
 create index if not exists idx_classrooms_code on public.classrooms (code);
+create index if not exists idx_classrooms_owner_id on public.classrooms (owner_id);
 create index if not exists idx_participants_classroom_id on public.participants (classroom_id);
+create index if not exists idx_participants_user_id on public.participants (user_id);
+
+-- ---------------------------------------------------------------------------
+-- Helper functions
+--
+-- Kept in a schema the Data API does not expose. SECURITY DEFINER lets the
+-- policies check classroom state without granting users read access to
+-- other people's rows.
+-- ---------------------------------------------------------------------------
+
+create schema if not exists private;
+grant usage on schema private to authenticated;
+
+create or replace function private.owns_active_classroom(p_classroom_id uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.classrooms c
+    where c.id = p_classroom_id and c.owner_id = auth.uid() and c.active
+  );
+$$;
+
+create or replace function private.is_active_classroom(p_classroom_id uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.classrooms c
+    where c.id = p_classroom_id and c.active
+  );
+$$;
+
+-- Realtime topics are named `classroom:<CODE>`.
+create or replace function private.owns_topic(p_topic text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.classrooms c
+    where 'classroom:' || c.code = p_topic and c.owner_id = auth.uid() and c.active
+  );
+$$;
+
+create or replace function private.can_join_topic(p_topic text)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.classrooms c
+    join public.participants p on p.classroom_id = c.id
+    where 'classroom:' || c.code = p_topic and c.active and p.user_id = auth.uid()
+  ) or private.owns_topic(p_topic);
+$$;
+
+revoke all on function private.owns_active_classroom(uuid) from public;
+revoke all on function private.is_active_classroom(uuid) from public;
+revoke all on function private.owns_topic(text) from public;
+revoke all on function private.can_join_topic(text) from public;
+grant execute on function private.owns_active_classroom(uuid) to authenticated;
+grant execute on function private.is_active_classroom(uuid) to authenticated;
+grant execute on function private.owns_topic(text) to authenticated;
+grant execute on function private.can_join_topic(text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Classroom lookup
+--
+-- Students find a classroom by its exact code through this function instead
+-- of reading the table, so codes and names can't be listed in bulk.
+-- ---------------------------------------------------------------------------
+
+create or replace function public.find_classroom_by_code(p_code text)
+returns table (id uuid, code text, teacher_name text, created_at timestamptz, active boolean)
+language sql stable security definer set search_path = ''
+as $$
+  select c.id, c.code, c.teacher_name, c.created_at, c.active
+  from public.classrooms c
+  where c.code = upper(trim(p_code));
+$$;
+
+revoke all on function public.find_classroom_by_code(text) from public, anon;
+grant execute on function public.find_classroom_by_code(text) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security
 --
--- This MVP has no user accounts — access is scoped only by knowing a
--- classroom code, which is intentional per the product spec. Policies below
--- deliberately allow the anon key to read/write ONLY these two tables, and
--- only in the ways the app needs (no delete, no arbitrary table access).
+-- No user accounts are shown in the app: access is still scoped by knowing a
+-- classroom code. The anonymous auth user behind each device is what lets us
+-- restrict who may change a classroom or send captions.
 -- ---------------------------------------------------------------------------
 
 alter table public.classrooms enable row level security;
 alter table public.participants enable row level security;
 
--- Classrooms: anyone can create one, look one up (to join/validate a code),
--- or mark their own classroom inactive when captions end. No public delete.
-create policy "classrooms_insert" on public.classrooms
-  for insert to anon
-  with check (true);
+-- Classrooms: a signed-in device can create one for itself, see the ones it
+-- created, and end them. Nobody else can read, rename or re-code them.
+create policy "classrooms_insert_own" on public.classrooms
+  for insert to authenticated
+  with check (owner_id = (select auth.uid()));
 
-create policy "classrooms_select" on public.classrooms
-  for select to anon
-  using (true);
+create policy "classrooms_select_own" on public.classrooms
+  for select to authenticated
+  using (owner_id = (select auth.uid()));
 
-create policy "classrooms_update" on public.classrooms
-  for update to anon
-  using (true)
-  with check (true);
+create policy "classrooms_update_own" on public.classrooms
+  for update to authenticated
+  using (owner_id = (select auth.uid()))
+  with check (owner_id = (select auth.uid()));
 
--- Participants: anyone can register themselves as joining a classroom, and
--- read the participant list (used for presence/debugging). No public delete.
-create policy "participants_insert" on public.participants
-  for insert to anon
-  with check (true);
+-- Participants: a device registers only itself. Only a classroom's owner can
+-- join it as the teacher, and students can only join active classrooms.
+create policy "participants_insert_self" on public.participants
+  for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and (
+      (role = 'teacher' and private.owns_active_classroom(classroom_id))
+      or (role = 'student' and private.is_active_classroom(classroom_id))
+    )
+  );
 
-create policy "participants_select" on public.participants
-  for select to anon
-  using (true);
+create policy "participants_select_self" on public.participants
+  for select to authenticated
+  using (user_id = (select auth.uid()));
+
+-- ---------------------------------------------------------------------------
+-- Grants
+--
+-- Newer Supabase projects don't expose new tables to the Data API by default,
+-- so grant exactly what the policies above allow. The anon role (requests
+-- with no signed-in user) gets nothing; updates are limited to `active`.
+-- ---------------------------------------------------------------------------
+
+revoke all on public.classrooms from anon, authenticated;
+revoke all on public.participants from anon, authenticated;
+
+grant usage on schema public to authenticated;
+grant select, insert on public.classrooms to authenticated;
+grant update (active) on public.classrooms to authenticated;
+grant select, insert on public.participants to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Realtime
 --
--- Live caption text itself is sent over Supabase Realtime Broadcast on a
--- per-classroom channel (`classroom:<CODE>`), which requires no table and
--- no extra config. Adding these tables to the realtime publication is
--- optional for this MVP (e.g. if you later want the teacher's student list
--- to update live via Postgres Changes instead of presence), but harmless.
+-- Live caption text is sent over Supabase Realtime Broadcast on a private
+-- per-classroom channel (`classroom:<CODE>`) and is never stored. These
+-- policies on realtime.messages decide who may join, send and track presence.
 -- ---------------------------------------------------------------------------
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'classrooms'
-  ) then
-    alter publication supabase_realtime add table public.classrooms;
-  end if;
+-- Teacher and registered students of an active classroom receive its
+-- broadcasts and presence.
+create policy "classroom_members_receive" on realtime.messages
+  for select to authenticated
+  using (
+    realtime.messages.extension in ('broadcast', 'presence')
+    and private.can_join_topic((select realtime.topic()))
+  );
 
-  if not exists (
-    select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'participants'
-  ) then
-    alter publication supabase_realtime add table public.participants;
-  end if;
-end $$;
+-- Only the classroom's teacher may broadcast captions.
+create policy "classroom_owner_broadcasts" on realtime.messages
+  for insert to authenticated
+  with check (
+    realtime.messages.extension = 'broadcast'
+    and private.owns_topic((select realtime.topic()))
+  );
+
+-- Members may announce themselves in presence (used for the student count).
+create policy "classroom_members_track_presence" on realtime.messages
+  for insert to authenticated
+  with check (
+    realtime.messages.extension = 'presence'
+    and private.can_join_topic((select realtime.topic()))
+  );
