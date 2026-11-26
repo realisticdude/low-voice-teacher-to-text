@@ -55,8 +55,31 @@ export function useSpeechRecognition(
   const lastFinalTranscriptRef = useRef<string>("");
   const onFinalTranscriptRef = useRef(onFinalTranscript);
   onFinalTranscriptRef.current = onFinalTranscript;
+  // When the current recognizer session began, and whether we've already
+  // asked it to wind down so it can be replaced (see maybeRecycleSession).
+  const sessionStartedAtRef = useRef(0);
+  const recyclingRef = useRef(false);
+
+  // A continuous session gets slower the longer it runs: the browser's
+  // SpeechRecognition re-sends every result of the session on each event, and
+  // iOS before 18 keeps one ever-growing transcript (and stops after about a
+  // minute). Stopping the session lets the "end" handler start a fresh one,
+  // just like the teacher tapping Pause and Start, but at a sentence boundary
+  // so no words are cut off.
+  const maybeRecycleSession = (isFinal: boolean) => {
+    if (!wantsListeningRef.current || recyclingRef.current) return;
+    const age = Date.now() - sessionStartedAtRef.current;
+    if ((isFinal && age >= RECYCLE_AFTER_MS) || age >= MAX_SESSION_MS) {
+      recyclingRef.current = true;
+      // stop() (not abort()) makes the recognizer finalize what it has heard
+      // before it ends.
+      ExpoSpeechRecognitionModule.stop();
+    }
+  };
 
   useSpeechRecognitionEvent("start", () => {
+    sessionStartedAtRef.current = Date.now();
+    recyclingRef.current = false;
     setStatus("listening");
     setErrorMessage(null);
   });
@@ -69,14 +92,14 @@ export function useSpeechRecognition(
       setInterimText("");
       // Guard against the same final result firing twice in a row, which
       // some Android recognizer services do at segment boundaries.
-      if (transcript.trim() === lastFinalTranscriptRef.current.trim()) {
-        return;
+      if (transcript.trim() !== lastFinalTranscriptRef.current.trim()) {
+        lastFinalTranscriptRef.current = transcript;
+        onFinalTranscriptRef.current(transcript.trim());
       }
-      lastFinalTranscriptRef.current = transcript;
-      onFinalTranscriptRef.current(transcript.trim());
     } else {
       setInterimText(transcript);
     }
+    maybeRecycleSession(event.isFinal);
   });
 
   useSpeechRecognitionEvent("error", (event) => {
@@ -109,6 +132,7 @@ export function useSpeechRecognition(
   });
 
   useSpeechRecognitionEvent("end", () => {
+    recyclingRef.current = false;
     setInterimText("");
     setVolume(null);
     if (errorShownRef.current) {
@@ -204,6 +228,15 @@ export function useSpeechRecognition(
 
 const PERMISSION_DENIED_MESSAGE =
   "Microphone or speech recognition permission was denied. Enable it in Settings to use captions.";
+
+/** Replace the session at the next finished sentence once it's this old. */
+const RECYCLE_AFTER_MS = 30_000;
+/**
+ * Replace it regardless after this long, for recognizers that never send a
+ * final result mid-session (iOS before 18). Stays under Apple's ~1 minute
+ * limit per recognition task.
+ */
+const MAX_SESSION_MS = 50_000;
 
 const RECOGNITION_OPTIONS: ExpoSpeechRecognitionOptions = {
   lang: "en-US",
