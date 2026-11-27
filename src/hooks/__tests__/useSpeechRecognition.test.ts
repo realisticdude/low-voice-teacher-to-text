@@ -134,3 +134,19 @@ describe("useSpeechRecognition session recycling", () => {
     expect(hook.result.current.status).toBe("stopped");
   });
 });
+
+describe("useSpeechRecognition language", () => {
+  it("recognizes the chosen language, including on automatic restarts", async () => {
+    const hook = await renderHook(() => useSpeechRecognition(() => {}, "hi-IN"));
+    await act(async () => {
+      await hook.result.current.start();
+    });
+    await emit("start");
+    await speakFor(40, 5, (i) => finalResult(`वाक्य ${i}`));
+
+    expect(startMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const [options] of startMock.mock.calls) {
+      expect(options.lang).toBe("hi-IN");
+    }
+  });
+});

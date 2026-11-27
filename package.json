@@ -3,11 +3,18 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "^2.112.3",
     "expo": "~57.0.33",
     "expo-application": "~57.0.3",
     "expo-dev-client": "~57.0.22",
+    "expo-file-system": "~57.0.7",
+    "expo-font": "~57.0.4",
+    "expo-print": "~57.0.2",
+    "expo-sharing": "~57.0.27",
     "expo-speech-recognition": "^56.0.1",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
@@ -31,10 +38,20 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "test": "jest"
+    "test": "jest",
+    "lint": "expo lint"
   },
   "private": true,
   "jest": {
-    "preset": "jest-expo"
+    "preset": "jest-expo",
+    "setupFiles": [
+      "./jest.setup.js"
+    ],
+    "testTimeout": 30000,
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/supabase/functions/",
+      "/dist/"
+    ]
   }
 }

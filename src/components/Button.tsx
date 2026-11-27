@@ -1,101 +1,144 @@
 import React from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { colors, spacing } from "./theme";
+import { ActivityIndicator, Animated, Pressable, StyleSheet, View } from "react-native";
+import Feather from "@expo/vector-icons/Feather";
+import { Text } from "./Text";
+import { colors, radius, spacing, touchTarget } from "./theme";
+import { usePressAnimation } from "./usePressAnimation";
+
+type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Size = "sm" | "md" | "lg";
+type IconName = React.ComponentProps<typeof Feather>["name"];
 
 interface ButtonProps {
   label: string;
   onPress: () => void;
-  variant?: "primary" | "secondary" | "danger";
+  variant?: Variant;
+  size?: Size;
+  icon?: IconName;
+  iconRight?: IconName;
   disabled?: boolean;
   loading?: boolean;
-  size?: "large" | "medium";
+  /** Stretch to the container width (default) or hug the content. */
+  fullWidth?: boolean;
+  accessibilityHint?: string;
 }
+
+const HEIGHTS: Record<Size, number> = { sm: touchTarget, md: 48, lg: 56 };
+
+const PALETTE: Record<
+  Variant,
+  { bg: string; bgHover: string; border: string; fg: string }
+> = {
+  primary: {
+    bg: colors.accent,
+    bgHover: colors.accentHover,
+    border: colors.accent,
+    fg: colors.onAccent,
+  },
+  secondary: {
+    bg: colors.surfaceRaised,
+    bgHover: colors.surfaceHover,
+    border: colors.border,
+    fg: colors.text,
+  },
+  ghost: {
+    bg: "transparent",
+    bgHover: colors.surfaceRaised,
+    border: "transparent",
+    fg: colors.textSecondary,
+  },
+  danger: {
+    bg: colors.dangerSoft,
+    bgHover: "rgba(255, 107, 112, 0.2)",
+    border: colors.dangerBorder,
+    fg: colors.danger,
+  },
+};
 
 export function Button({
   label,
   onPress,
   variant = "primary",
+  size = "md",
+  icon,
+  iconRight,
   disabled,
   loading,
-  size = "medium",
+  fullWidth = true,
+  accessibilityHint,
 }: ButtonProps) {
-  const isPrimary = variant === "primary";
-  const isDanger = variant === "danger";
+  const inactive = Boolean(disabled || loading);
+  const { hovered, focused, animatedStyle, handlers } = usePressAnimation();
+  const palette = PALETTE[variant];
+  const iconSize = size === "lg" ? 20 : 18;
 
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled || loading}
-      style={({ pressed }) => [
-        styles.base,
-        size === "large" && styles.large,
-        isPrimary && { backgroundColor: colors.primary },
-        isDanger && { backgroundColor: colors.danger },
-        !isPrimary && !isDanger && styles.secondary,
-        (disabled || loading) && styles.disabled,
-        pressed && !disabled && styles.pressed,
-      ]}
+      disabled={inactive}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: inactive, busy: Boolean(loading) }}
+      style={[!fullWidth && styles.hug]}
+      {...handlers}
     >
-      <View style={styles.content}>
-        {loading && (
-          <ActivityIndicator
-            color={isPrimary || isDanger ? colors.primaryText : colors.text}
-            style={{ marginRight: spacing.sm }}
-          />
+      <Animated.View
+        style={[
+          styles.base,
+          {
+            minHeight: HEIGHTS[size],
+            paddingHorizontal: size === "sm" ? spacing.md : spacing.lg,
+            backgroundColor: hovered && !inactive ? palette.bgHover : palette.bg,
+            borderColor: palette.border,
+          },
+          focused && styles.focusRing,
+          inactive && styles.inactive,
+          animatedStyle,
+        ]}
+      >
+        {loading ? (
+          <ActivityIndicator color={palette.fg} size="small" />
+        ) : (
+          icon && <Feather name={icon} size={iconSize} color={palette.fg} />
         )}
         <Text
-          style={[
-            styles.label,
-            size === "large" && styles.labelLarge,
-            isPrimary || isDanger
-              ? { color: colors.primaryText }
-              : { color: colors.text },
-          ]}
+          variant={size === "lg" ? "heading" : "label"}
+          style={{ color: palette.fg }}
+          numberOfLines={1}
         >
           {label}
         </Text>
-      </View>
+        {iconRight && !loading && (
+          <View style={styles.iconRight}>
+            <Feather name={iconRight} size={iconSize} color={palette.fg} />
+          </View>
+        )}
+      </Animated.View>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  hug: {
+    alignSelf: "flex-start",
+  },
   base: {
-    borderRadius: 14,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  large: {
-    paddingVertical: spacing.lg,
-  },
-  secondary: {
-    backgroundColor: colors.surfaceAlt,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  pressed: {
-    opacity: 0.85,
-  },
-  content: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
   },
-  label: {
-    fontSize: 16,
-    fontWeight: "600",
+  iconRight: {
+    marginLeft: spacing.xxs,
   },
-  labelLarge: {
-    fontSize: 19,
+  focusRing: {
+    borderColor: colors.accentHover,
+    borderWidth: 2,
+  },
+  inactive: {
+    opacity: 0.45,
   },
 });

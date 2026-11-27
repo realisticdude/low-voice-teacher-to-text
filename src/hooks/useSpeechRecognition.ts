@@ -39,8 +39,13 @@ interface UseSpeechRecognitionResult {
  * - pausing while the app is backgrounded (mic access is unreliable/blocked there)
  */
 export function useSpeechRecognition(
-  onFinalTranscript: (text: string) => void
+  onFinalTranscript: (text: string) => void,
+  /** BCP-47 locale to recognize, e.g. "en-US" or "hi-IN". Applies from the next start. */
+  locale: string = "en-US"
 ): UseSpeechRecognitionResult {
+  // Read through a ref so automatic restarts use the latest choice.
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
   const [status, setStatus] = useState<SpeechRecognitionStatus>("idle");
   const [interimText, setInterimText] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -145,7 +150,7 @@ export function useSpeechRecognition(
       // The native session ended on its own (common on Android without
       // continuous support) - restart to keep captions flowing.
       try {
-        ExpoSpeechRecognitionModule.start(RECOGNITION_OPTIONS);
+        ExpoSpeechRecognitionModule.start(recognitionOptions(localeRef.current));
         setStatus("starting");
       } catch {
         wantsListeningRef.current = false;
@@ -205,7 +210,7 @@ export function useSpeechRecognition(
     wantsListeningRef.current = true;
     setStatus("starting");
     try {
-      ExpoSpeechRecognitionModule.start(RECOGNITION_OPTIONS);
+      ExpoSpeechRecognitionModule.start(recognitionOptions(localeRef.current));
     } catch (err) {
       wantsListeningRef.current = false;
       setStatus("error");
@@ -238,8 +243,8 @@ const RECYCLE_AFTER_MS = 30_000;
  */
 const MAX_SESSION_MS = 50_000;
 
-const RECOGNITION_OPTIONS: ExpoSpeechRecognitionOptions = {
-  lang: "en-US",
+const recognitionOptions = (lang: string): ExpoSpeechRecognitionOptions => ({
+  lang,
   interimResults: true,
   continuous: true,
   addsPunctuation: true,
@@ -255,4 +260,4 @@ const RECOGNITION_OPTIONS: ExpoSpeechRecognitionOptions = {
     EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: 3000,
     EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: 3000,
   },
-};
+});

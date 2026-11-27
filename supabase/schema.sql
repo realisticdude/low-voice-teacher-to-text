@@ -229,3 +229,93 @@ create policy "classroom_members_track_presence" on realtime.messages
     realtime.messages.extension = 'presence'
     and private.can_join_topic((select realtime.topic()))
   );
+
+-- ---------------------------------------------------------------------------
+-- Transcripts (kept for 24 hours)
+--
+-- The live broadcast above is never stored. Separately, the teacher's device
+-- saves each *finished* sentence here (plus its English translation when it
+-- was spoken in Hindi) so the class can download the whole transcript as a
+-- PDF or text file. Rows older than 24 hours are hidden by the read policy
+-- and deleted hourly by a pg_cron job, so the server never keeps them longer.
+-- ---------------------------------------------------------------------------
+
+create table if not exists public.transcript_segments (
+  id bigint generated always as identity primary key,
+  classroom_id uuid not null references public.classrooms (id) on delete cascade,
+  seq integer not null check (seq > 0),
+  lang text not null check (lang in ('en', 'hi')),
+  text text not null check (char_length(text) between 1 and 5000),
+  text_en text check (text_en is null or char_length(text_en) <= 10000),
+  created_at timestamptz not null default now(),
+  unique (classroom_id, seq)
+);
+
+create index if not exists idx_transcript_segments_created_at
+  on public.transcript_segments (created_at);
+
+-- The teacher who created the class, whether or not it has ended (a
+-- translation can finish just after the class ends).
+create or replace function private.owns_classroom(p_classroom_id uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.classrooms c
+    where c.id = p_classroom_id and c.owner_id = auth.uid()
+  );
+$$;
+
+-- The teacher or any student who joined the class.
+create or replace function private.is_classroom_member(p_classroom_id uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select private.owns_classroom(p_classroom_id) or exists (
+    select 1 from public.participants p
+    where p.classroom_id = p_classroom_id and p.user_id = auth.uid()
+  );
+$$;
+
+revoke all on function private.owns_classroom(uuid) from public;
+revoke all on function private.is_classroom_member(uuid) from public;
+grant execute on function private.owns_classroom(uuid) to authenticated;
+grant execute on function private.is_classroom_member(uuid) to authenticated;
+
+alter table public.transcript_segments enable row level security;
+
+-- Only the teacher adds sentences, and only while the class is live.
+drop policy if exists "transcript_insert_owner" on public.transcript_segments;
+create policy "transcript_insert_owner" on public.transcript_segments
+  for insert to authenticated
+  with check (private.owns_active_classroom(classroom_id));
+
+-- Only the teacher fills in translations.
+drop policy if exists "transcript_update_owner" on public.transcript_segments;
+create policy "transcript_update_owner" on public.transcript_segments
+  for update to authenticated
+  using (private.owns_classroom(classroom_id))
+  with check (private.owns_classroom(classroom_id));
+
+-- Class members read it, for 24 hours (even if the cleanup job runs late).
+drop policy if exists "transcript_select_members" on public.transcript_segments;
+create policy "transcript_select_members" on public.transcript_segments
+  for select to authenticated
+  using (
+    created_at > now() - interval '24 hours'
+    and private.is_classroom_member(classroom_id)
+  );
+
+revoke all on public.transcript_segments from anon, authenticated;
+grant select, insert on public.transcript_segments to authenticated;
+grant update (text_en) on public.transcript_segments to authenticated;
+
+-- Hourly cleanup. pg_cron ships with Supabase; this enables it if needed
+-- (Database > Extensions shows it too). Re-running reschedules the same job.
+create extension if not exists pg_cron with schema pg_catalog;
+
+select cron.schedule(
+  'delete-old-transcripts',
+  '0 * * * *',
+  $$delete from public.transcript_segments where created_at < now() - interval '24 hours'$$
+);
