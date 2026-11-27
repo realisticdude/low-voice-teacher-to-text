@@ -42,8 +42,11 @@ const FACTS: { icon: FeatherName; label: string }[] = [
 ];
 
 export function HomeScreen({ onSelectRole }: HomeScreenProps) {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const wide = width >= wideBreakpoint;
+  // Small phones (e.g. 320×568): tighten the hero so both role cards are
+  // on the first screen without scrolling.
+  const compact = !wide && (width < 360 || height < 700);
   const scrollRef = useRef<ScrollView>(null);
   const [recent, setRecent] = useState<RecentClass[]>([]);
 
@@ -53,20 +56,20 @@ export function HomeScreen({ onSelectRole }: HomeScreenProps) {
 
   return (
     <Screen scroll maxWidth={wide ? 1080 : 560} scrollRef={scrollRef}>
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, compact && styles.topBarCompact]}>
         <Logo
           onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
           accessibilityLabel="LiveClass Caption, back to top"
         />
       </View>
 
-      <View style={[styles.main, wide && styles.mainWide]}>
+      <View style={[styles.main, wide && styles.mainWide, compact && styles.mainCompact]}>
         {/* Value proposition */}
-        <View style={[styles.hero, wide && styles.heroWide]}>
+        <View style={[styles.hero, wide && styles.heroWide, compact && styles.heroCompact]}>
           <Text variant="overline" tone="accent">
             Live classroom captions
           </Text>
-          <Text variant="display" style={wide && styles.displayWide}>
+          <Text variant="display" style={[wide && styles.displayWide, compact && styles.displayCompact]}>
             Every word, on every screen.
           </Text>
           <Text variant="body" tone="secondary" style={styles.lede}>
@@ -89,6 +92,7 @@ export function HomeScreen({ onSelectRole }: HomeScreenProps) {
             Choose your role
           </Text>
           <RoleCard
+            compact={compact}
             icon="mic"
             title="I'm teaching"
             description="Start a class and get a code to share."
@@ -96,6 +100,7 @@ export function HomeScreen({ onSelectRole }: HomeScreenProps) {
             onPress={() => onSelectRole("teacher")}
           />
           <RoleCard
+            compact={compact}
             icon="smartphone"
             title="I'm a student"
             description="Join with the code from your teacher."
@@ -215,10 +220,11 @@ interface RoleCardProps {
   title: string;
   description: string;
   emphasis?: boolean;
+  compact?: boolean;
   onPress: () => void;
 }
 
-function RoleCard({ icon, title, description, emphasis, onPress }: RoleCardProps) {
+function RoleCard({ icon, title, description, emphasis, compact, onPress }: RoleCardProps) {
   const { hovered, focused, animatedStyle, handlers } = usePressAnimation(0.98);
 
   return (
@@ -232,13 +238,20 @@ function RoleCard({ icon, title, description, emphasis, onPress }: RoleCardProps
       <Animated.View
         style={[
           styles.roleCard,
+          compact && styles.roleCardCompact,
           emphasis && styles.roleCardEmphasis,
           hovered && styles.roleCardHover,
           focused && styles.roleCardFocus,
           animatedStyle,
         ]}
       >
-        <View style={[styles.roleIcon, emphasis && styles.roleIconEmphasis]}>
+        <View
+          style={[
+            styles.roleIcon,
+            compact && styles.roleIconCompact,
+            emphasis && styles.roleIconEmphasis,
+          ]}
+        >
           <Feather
             name={icon}
             size={22}
@@ -266,6 +279,28 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: "center",
     marginBottom: spacing.xl,
+  },
+  topBarCompact: {
+    marginBottom: spacing.md,
+  },
+  mainCompact: {
+    gap: spacing.lg,
+  },
+  heroCompact: {
+    gap: spacing.sm,
+  },
+  displayCompact: {
+    fontSize: 28,
+    lineHeight: 34,
+    letterSpacing: -0.7,
+  },
+  roleCardCompact: {
+    minHeight: 72,
+    padding: spacing.md,
+  },
+  roleIconCompact: {
+    width: 40,
+    height: 40,
   },
   main: {
     gap: spacing.xl,

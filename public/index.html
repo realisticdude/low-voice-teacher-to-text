@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <!--
+      viewport-fit=cover lets the app draw behind notches and home indicators;
+      the screens add the matching safe-area padding themselves. Pinch-zoom is
+      left enabled on purpose, for low-vision readers.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+    <meta name="description" content="Live classroom captions: the teacher speaks, students read every word on their own phones, in Hindi or English." />
+    <!-- Mobile browser chrome (address bar, status bar) matches the dark app. -->
+    <meta name="theme-color" content="#09090B" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="LiveClass" />
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* Follow the visible area as mobile browser toolbars show and hide, so
+         bottom buttons are never hidden behind them. */
+      @supports (height: 100dvh) {
+        html,
+        body {
+          height: 100dvh;
+        }
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      html,
+      body {
+        background-color: #09090b;
+        /* No pull-to-refresh or bounce: an accidental pull mid-class would
+           reload the page and drop the teacher or student out of the class. */
+        overscroll-behavior: none;
+        /* No grey flash on tap, no font inflation in landscape on iOS. */
+        -webkit-tap-highlight-color: transparent;
+        -webkit-text-size-adjust: 100%;
+        text-size-adjust: 100%;
+        /* Taps fire immediately (no double-tap-to-zoom delay); pinch-zoom still works. */
+        touch-action: manipulation;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>

@@ -252,7 +252,7 @@ function LiveView({
   const translationDown = showEnglish && caption?.translationStatus === "unavailable";
 
   return (
-    <Screen maxWidth={wide ? 1000 : 640}>
+    <Screen scroll fill maxWidth={wide ? 1000 : 640}>
       <View style={styles.liveHeader}>
         <View style={styles.classInfo}>
           <Text variant="overline" tone="muted">

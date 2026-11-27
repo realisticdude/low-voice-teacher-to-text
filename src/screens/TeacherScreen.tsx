@@ -9,6 +9,7 @@ import { StatusPill } from "../components/StatusPill";
 import { CaptionView } from "../components/CaptionView";
 import { Banner } from "../components/Banner";
 import { Card } from "../components/Card";
+import { IconButton } from "../components/IconButton";
 import { Logo } from "../components/Logo";
 import { LiveBadge } from "../components/LiveBadge";
 import { MicLevel } from "../components/MicLevel";
@@ -474,7 +475,9 @@ function LiveView(props: LiveViewProps) {
     />
   );
 
-  const controls = (
+  // Start/Pause and the mic meter: pinned to the bottom on phones so they're
+  // always in reach; in the sidebar on wide screens.
+  const primaryControls = (
     <View style={styles.controls}>
       {props.isListening ? (
         <Button label="Pause captions" icon="pause" variant="secondary" size="lg" onPress={props.onStop} />
@@ -488,7 +491,11 @@ function LiveView(props: LiveViewProps) {
         />
       )}
       {props.isListening && props.volume !== null ? <MicLevel volume={props.volume} /> : null}
+    </View>
+  );
 
+  const secondaryControls = (
+    <View style={styles.controls}>
       {props.confirmingEnd ? (
         <Banner
           tone="danger"
@@ -536,7 +543,8 @@ function LiveView(props: LiveViewProps) {
             <CodeCard code={props.code} studentCount={props.studentCount} />
             {speechBanner}
             {serviceBanners}
-            {controls}
+            {primaryControls}
+            {secondaryControls}
             <Card padding={spacing.lg} style={styles.downloadCard}>
               <Text variant="overline" tone="muted">
                 Transcript
@@ -551,14 +559,14 @@ function LiveView(props: LiveViewProps) {
   }
 
   return (
-    <Screen maxWidth={640}>
+    <Screen scroll fill maxWidth={640} footer={primaryControls}>
       {header}
       <View style={styles.stack}>
         <CodeCard code={props.code} studentCount={props.studentCount} compact />
         {speechBanner}
         {serviceBanners}
         {captions}
-        {controls}
+        {secondaryControls}
       </View>
     </Screen>
   );
@@ -602,12 +610,19 @@ function CodeCard({
 
   const shareLabel =
     canNativeShare || canWebShare ? "Share code" : copied ? "Copied" : "Copy code";
+  const shareIcon = copied
+    ? "check"
+    : canWebCopy && !canWebShare && !canNativeShare
+      ? "copy"
+      : "share";
   const showShare = canNativeShare || canWebShare || canWebCopy;
 
   return (
-    <Card raised padding={spacing.lg} style={styles.codeCard}>
+    // Phones get 16px padding: at 320px wide, 24px leaves too little room
+    // for the code and its button side by side.
+    <Card raised padding={compact ? spacing.md : spacing.lg} style={styles.codeCard}>
       <View style={[styles.codeRow, !compact && styles.codeRowStacked]}>
-        <View style={styles.codeBlock}>
+        <View style={[styles.codeBlock, compact && styles.codeBlockCompact]}>
           <Text variant="overline" tone="muted">
             Class code
           </Text>
@@ -619,16 +634,19 @@ function CodeCard({
             {code}
           </Text>
         </View>
-        {showShare && (
-          <Button
-            label={shareLabel}
-            icon={copied ? "check" : canWebCopy && !canWebShare && !canNativeShare ? "copy" : "share"}
-            variant="secondary"
-            size="sm"
-            fullWidth={!compact}
-            onPress={handleShare}
-          />
-        )}
+        {showShare &&
+          (compact ? (
+            // Icon-only on phones so it never pushes past the card edge.
+            <IconButton icon={shareIcon} label={shareLabel} onPress={handleShare} />
+          ) : (
+            <Button
+              label={shareLabel}
+              icon={shareIcon}
+              variant="secondary"
+              size="sm"
+              onPress={handleShare}
+            />
+          ))}
       </View>
       <View style={styles.divider} />
       <View style={styles.countRow} accessibilityLiveRegion="polite">
@@ -703,6 +721,10 @@ const styles = StyleSheet.create({
   codeRowStacked: {
     flexDirection: "column",
     alignItems: "stretch",
+  },
+  codeBlockCompact: {
+    flex: 1,
+    minWidth: 0,
   },
   codeBlock: {
     gap: spacing.xs,

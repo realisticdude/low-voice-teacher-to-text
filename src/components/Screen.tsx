@@ -22,6 +22,17 @@ interface ScreenProps {
   contentStyle?: StyleProp<ViewStyle>;
   /** Lets a page scroll itself (e.g. the logo's "back to top"). */
   scrollRef?: React.Ref<ScrollView>;
+  /**
+   * With `scroll`: the column fills the screen (so a flexible child like the
+   * caption box can grow), and the page only scrolls when the content can't
+   * fit, e.g. on small phones or in landscape. Keeps every control reachable.
+   */
+  fill?: boolean;
+  /**
+   * Pinned action bar below the content (outside the scroll area), for the
+   * one action that must always be in reach on a phone.
+   */
+  footer?: React.ReactNode;
 }
 
 /**
@@ -34,12 +45,14 @@ export function Screen({
   maxWidth = 560,
   contentStyle,
   scrollRef,
+  fill = false,
+  footer,
 }: ScreenProps) {
   const { width } = useWindowDimensions();
   const gutter = width < 600 ? spacing.md : spacing.lg;
 
   const column = (
-    <View style={[styles.column, { maxWidth }, !scroll && styles.fill, contentStyle]}>
+    <View style={[styles.column, { maxWidth }, (!scroll || fill) && styles.fill, contentStyle]}>
       {children}
     </View>
   );
@@ -55,7 +68,11 @@ export function Screen({
           <ScrollView
             ref={scrollRef}
             style={styles.fill}
-            contentContainerStyle={[styles.scrollContent, { paddingHorizontal: gutter }]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              fill && styles.scrollContentFill,
+              { paddingHorizontal: gutter },
+            ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -66,6 +83,11 @@ export function Screen({
             {column}
           </View>
         )}
+        {footer ? (
+          <View style={[styles.footer, { paddingHorizontal: gutter }]}>
+            <View style={[styles.column, { maxWidth }]}>{footer}</View>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -83,6 +105,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     alignItems: "center",
     paddingVertical: spacing.lg,
+  },
+  footer: {
+    alignItems: "center",
+    paddingTop: spacing.sm + spacing.xs,
+    paddingBottom: spacing.sm + spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  scrollContentFill: {
+    paddingVertical: spacing.md,
   },
   fixedContent: {
     alignItems: "center",

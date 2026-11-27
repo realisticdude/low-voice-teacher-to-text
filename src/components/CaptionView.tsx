@@ -75,8 +75,15 @@ export function CaptionView({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    minHeight: 220,
+    // Take the space left over, never size to the transcript: a 0px basis
+    // keeps a long transcript scrolling inside this box (and auto-following
+    // the latest line) instead of stretching the whole page on phones.
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    // Enough for a few lines of large captions on the smallest phones; the
+    // page scrolls rather than squashing it further.
+    minHeight: 200,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -85,6 +92,7 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
